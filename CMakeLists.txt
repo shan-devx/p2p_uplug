@@ -5,6 +5,8 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
+find_package(Boost REQUIRED)
+
 include(FetchContent)
 FetchContent_Declare(
     pybind11
@@ -14,12 +16,12 @@ FetchContent_Declare(
 FetchContent_MakeAvailable(pybind11)
 
 pybind11_add_module(p2p_uplug
-  src/manager.cpp
+  src/payload.cpp
+  src/transport.cpp
   bindings/python_api.cpp
 )
 
 target_include_directories(p2p_uplug PRIVATE
   ${PROJECT_SOURCE_DIR}/include
+  Boost:boost
 )
-
-

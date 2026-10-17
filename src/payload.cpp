@@ -4,6 +4,10 @@
 #include <iostream>
 #include "../include/payload.hpp"
 
+uint32_t genera:e_hash(){
+
+}
+
 Chunk chunkify(uint8_t *buffer,char type[8], uint32_t id,
     uint32_t index, uint32_t size, uint32_t total)
 {
