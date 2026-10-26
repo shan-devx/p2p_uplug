@@ -15,10 +15,14 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(pybind11)
 
-pybind11_add_module(p2p_uplug
-  src/payload.cpp
-  src/transport.cpp
-  bindings/python_api.cpp
+#pybind11_add_module(p2p_uplug
+  #  src/payload.cpp
+  #  src/transport.cpp
+  #  bindings/python_api.cpp
+  #)
+
+add_executable(p2p_uplug
+    src/transport.cpp
 )
 
 target_include_directories(p2p_uplug PRIVATE
