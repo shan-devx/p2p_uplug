@@ -176,8 +176,8 @@ class LanTransport{
 
   public:
     LanTransport() : introducer_timer_(io_context_), 
-      introducer_socket_(io_context_, udp::endpoint(udp::v4(), 60007)),
-      user_pipe_endpoint_(tcp::v4(), 45783),
+      introducer_socket_(io_context_, udp::endpoint(udp::v4(), INTRODUCER_PORT)),
+      user_pipe_endpoint_(tcp::v4(), USER_PIPE_PORT),
       user_pipe_acceptor_(io_context_, user_pipe_endpoint_)
     {
       introducer_socket_.set_option(boost::asio::socket_base::broadcast(true));

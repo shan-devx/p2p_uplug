@@ -2,8 +2,35 @@
 #include <cstring>
 #include <ios>
 #include <iostream>
-#include "../include/payload.hpp"
+#include <string>
+#include <transport.hpp>
+#include <sodium.h>
+#include <vector>
 
+class UserManager{
+  private:
+    std::string username;
+    std::string private_key;
+    std::string public_key;
+  public:
+};
+
+struct Message{
+  std::string username;
+  std::vector<uint8_t> data;
+
+  std::string signature;
+  std::string public_key;
+};
+
+class PayloadManager{
+  private:
+    std::vector<Message> database;
+  public:
+  
+};
+
+/*
 uint32_t genera:e_hash(){
 
 }
@@ -53,3 +80,4 @@ void linux_payload(Payload &payload){
     index++;
   }
 }
+*/

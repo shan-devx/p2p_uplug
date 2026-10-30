@@ -1,6 +1,6 @@
 #ifndef PAYLOAD_HPP
 #define PAYLOAD_HPP
-
+/*
 #include <cstdint>
 #include <vector>
 #include <string>
@@ -37,5 +37,5 @@ class PayloadManager{
 
 void linux_payload(uint8_t *buffer, Payload &payload);
 uint32_t generare_hash();
-
+*/
 #endif
