@@ -1,7 +1,9 @@
 #ifndef PAYLOAD_HPP
 #define PAYLOAD_HPP
 
+#include <array>
 #include <cstring>
+#include <sodium/crypto_sign.h>
 #include <sys/types.h>
 #include <vector>
 #include <string>
@@ -10,19 +12,37 @@
 #include <iostream>
 #include <fstream>
 
-#define USER_SK_SAVE_PATH "./sk"
+// change it later (to support cross platform)
+#define USER_SK_SAVE_PATH "~/.config/p2p_uplug/p2p_key"
+#define USER_PK_SAVE_PATH "~/.config/p2p_uplug/p2p_key.pub"
 
 class UserManager{
   private:
-    std::string username;
-    std::string pk;
+    unsigned char pk[crypto_sign_PUBLICKEYBYTES];
+    bool ok = true;
+
   public:
+    UserManager(){
+      std::ifstream file(USER_PK_SAVE_PATH, std::ios::binary);
+      if(!file.is_open()){
+        std::cerr << "\n[LOG] User is not initizalized\n";
+        this->ok = false;
+      }
+
+      char pk[crypto_sign_SECRETKEYBYTES];
+      file.read(pk, sizeof pk);
+      
+      memcpy(this->pk, pk, sizeof this->pk);
+    }
     int init_user(UserManager &user, const char* passwd){
       unsigned char pk[crypto_sign_PUBLICKEYBYTES];
       unsigned char sk[crypto_sign_SECRETKEYBYTES];
   
       crypto_sign_keypair(pk, sk);
+      memcpy(user.pk, pk, crypto_sign_PUBLICKEYBYTES);
 
+
+      // encrypt secret key
       unsigned char salt[crypto_pwhash_SALTBYTES];
       unsigned char key[crypto_secretbox_KEYBYTES];
 
@@ -45,6 +65,7 @@ class UserManager{
           return 1;
       }
 
+      // saving
       std::ofstream file(USER_SK_SAVE_PATH, std::ios::binary);
       if(!file){
         std::cerr << "\n[ERROR] opening sk save path\n";
@@ -56,33 +77,87 @@ class UserManager{
       file.write(reinterpret_cast<const char*>(out), sizeof out);
       file.close();
 
+      file.open(USER_PK_SAVE_PATH, std::ios::binary);
+      if(!file){
+        std::cerr << "\n[ERROR] opening pk save path\n";
+      }
+      file.write(reinterpret_cast<const char*>(pk), sizeof pk);
+      file.close();
+
       sodium_memzero(sk, sizeof sk);
       sodium_memzero(key, sizeof key);
 
       return 0;
     }
 
-    unsigned char get_sk(const char* passwd){
+    int get_sk(const char* passwd, unsigned char* sk){
       std::fstream file(USER_SK_SAVE_PATH);
       if(!file){
         std::cerr << "\n[ERROR] sk file doesn't exist\n";
         return 1;
       }
 
+      char key[crypto_pwhash_SALTBYTES+crypto_secretbox_NONCEBYTES
+        +crypto_secretbox_MACBYTES];
+      file.read(key, sizeof key);
+
+      unsigned char salt[crypto_pwhash_SALTBYTES];
+      unsigned char nonce[crypto_secretbox_NONCEBYTES];
+      unsigned char encrypted[crypto_secretbox_MACBYTES];
+      memcpy(salt, key, sizeof salt);
+      memcpy(nonce, key+sizeof salt, sizeof nonce);
+      memcpy(encrypted, key + sizeof salt + sizeof nonce, sizeof encrypted);
+
+      unsigned char pwkey[crypto_secretbox_KEYBYTES];
+      if(crypto_pwhash(pwkey, sizeof pwkey, passwd, strlen(passwd),
+            salt, crypto_pwhash_OPSLIMIT_INTERACTIVE, 
+        crypto_pwhash_MEMLIMIT_INTERACTIVE, crypto_pwhash_ALG_DEFAULT) != 0)
+      {
+        std::cerr << "\n[ERROR] while running crypto_pwhash()\n";
+        return 1;
+      }
+
+      unsigned char decrypted[crypto_sign_SECRETKEYBYTES];
+      if(crypto_secretbox_open_easy(decrypted, encrypted, sizeof encrypted, 
+            nonce, pwkey) != 0)
+      {
+        std::cerr << "\n[ERROR] while running crypto_secretbox_easy()\n";
+        return 1;
+      }
+
+      memcpy(sk, decrypted, sizeof decrypted);
+
+      sodium_memzero(decrypted, sizeof decrypted);
+      sodium_memzero(pwkey, sizeof pwkey);
+      
+      return 0;
     };
+
+    int get_pk(unsigned char* pk){
+      std::ifstream file(USER_PK_SAVE_PATH, std::ios::binary);
+      if(!file){
+        std::cerr << "\n[ERROR] sk file doesn't exist\n";
+        return 1;
+      }
+
+      file.read((char*)pk, sizeof pk);
+
+      return 0;
+    }
+
 };
 
-struct Message{
-  std::string username;
-  std::vector<uint8_t> data;
-
-  std::string signature;
-  std::string public_key;
+class Message{
+  public:
+    std::vector<uint8_t> data;
+    unsigned char signature[crypto_sign_BYTES];
+    unsigned char pk[crypto_sign_PUBLICKEYBYTES]; // acts a username + signature check
 };
+
 
 class PayloadManager{
   private:
-    std::vector<Message> database;
+    std::vector<std::array<unsigned char, crypto_sign_BYTES>> database;
   public:
   
 };
