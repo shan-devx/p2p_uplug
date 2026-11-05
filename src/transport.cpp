@@ -12,7 +12,8 @@ boost::asio::ip::address_v4 my_ip(boost::asio::io_context& io){
 }
 
 int main(){
-  LanTransport a;
+  PayloadManager p;
+  LanTransport a(p);
   a.start(); 
 
   std::cin.get();

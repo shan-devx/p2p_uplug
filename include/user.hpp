@@ -1,13 +1,7 @@
 #ifndef PAYLOAD_HPP
 #define PAYLOAD_HPP
 
-#include <array>
 #include <cstring>
-#include <sodium/crypto_sign.h>
-#include <sys/types.h>
-#include <vector>
-#include <string>
-#include <cstdint>
 #include <sodium.h>
 #include <iostream>
 #include <fstream>
@@ -145,21 +139,6 @@ class UserManager{
       return 0;
     }
 
-};
-
-class Message{
-  public:
-    std::vector<uint8_t> data;
-    unsigned char signature[crypto_sign_BYTES];
-    unsigned char pk[crypto_sign_PUBLICKEYBYTES]; // acts a username + signature check
-};
-
-
-class PayloadManager{
-  private:
-    std::vector<std::array<unsigned char, crypto_sign_BYTES>> database;
-  public:
-  
 };
 
 #endif
