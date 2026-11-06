@@ -1,5 +1,5 @@
-#ifndef PAYLOAD_HPP
-#define PAYLOAD_HPP
+#ifndef __USER_HPP__
+#define __USER_HPP__
 
 #include <cstring>
 #include <sodium.h>

@@ -5,12 +5,16 @@
 #include <boost/asio.hpp>
 #include <cstddef>
 #include <cstring>
+#include <functional>
+#include <istream>
+#include <utility>
 #include <vector>
 #include <thread>
 #include <queue>
 #include <memory.h>
 #include <iostream>
 #include <sodium.h>
+#include <payload.hpp>
 
 #define INTRODUCER_WAIT 5
 #define USER_PIPE_PORT 0
@@ -19,54 +23,24 @@
 using boost::asio::ip::udp;
 using boost::asio::ip::tcp;
 
-
 boost::asio::ip::address_v4 my_ip(boost::asio::io_context& io);
 
-struct Message{
-    std::vector<uint8_t> data;
-    unsigned char signature[crypto_sign_BYTES];
-    unsigned char pk[crypto_sign_PUBLICKEYBYTES]; // acts a username + signature check
-};
-
-class PayloadManager{
-  private:
-    std::vector<std::array<unsigned char, crypto_sign_BYTES>> database_;
-
-  public:
-    int add_to_db(){
-
-
-      return 0;
-    }
-    std::vector<char> get_db(){
-      if(database_.empty()){
-        return {};
-      }
-
-      const char* a = reinterpret_cast<const char*>(database_.data());
-      size_t size = database_.size() * sizeof(std::array<unsigned char, crypto_sign_BYTES>);
-      return std::vector<char>(a, a+size);
-    }
-};
-
-
 class LanUserPipePeers : public std::enable_shared_from_this<LanUserPipePeers>{
+typedef std::pair<std::vector<char>, std::function<void()> const> msg_pair;
   private:
     tcp::socket socket_;
-    std::queue<std::vector<char>> send_queue_;
+    std::queue<msg_pair> send_queue_;
     bool sending_;
-    boost::asio::streambuf recv_buff_;
 
     void raw_send(){
       if(sending_) return;
 
       sending_ = true;
-      std::shared_ptr<std::vector<char>> msg 
-        = std::make_shared<std::vector<char>>(std::move(send_queue_.front()));
+      auto msg = std::make_shared<msg_pair>(std::move(send_queue_.front()));
       send_queue_.pop();
 
       boost::asio::async_write(socket_, 
-          boost::asio::buffer(*msg), 
+          boost::asio::buffer((*msg).first), 
           [msg,this](const boost::system::error_code& e, std::size_t byte)
         {
         if(e){
@@ -74,7 +48,8 @@ class LanUserPipePeers : public std::enable_shared_from_this<LanUserPipePeers>{
           // handle error properly
         }
         else{
-        std::cout << "\n[LOG] " << byte << " sent\n";
+          std::cout << "\n[LOG] " << byte << " sent\n";
+          msg->second();
         }
         
         sending_ = false;
@@ -96,26 +71,18 @@ class LanUserPipePeers : public std::enable_shared_from_this<LanUserPipePeers>{
       return socket_;
     }
 
-    void send(std::vector<char> msg){
+    void send(std::vector<char> msg, std::function<void()> const lambda){
       // !!! not sure if it will work cross platform(for struct n stuff)
-//      std::shared_ptr<std::vector<char>> b 
-//        = std::make_shared<std::vector<char>>(std::move(msg));
-//      (*b).push_back('\n');
-
       msg.push_back('\n');
-      boost::asio::post(socket_.get_executor(), [msg, this]()
+      boost::asio::post(socket_.get_executor(), [msg, lambda, this]()
         {
-          send_queue_.push(std::move(msg));
+          send_queue_.push(std::move(msg_pair(msg, lambda)));
         });
     }
 
-    // no need of this ig
-    std::string read(){
-//      boost::asio::async_read_until(socket_, recv_buff_, '\0' ,
-//          [](const boost::system::error_code& e, std::size_t bytes)
-//          {
-//          });
-      return "\n[DEBUG] you'r dumb\n";
+    void read(boost::asio::streambuf &recv_buff, std::function<
+        void(const boost::system::error_code& e, std::size_t bytes)> const lambda){
+      boost::asio::async_read_until(socket_, recv_buff, '\n' , lambda);
     }
 };
 
@@ -136,7 +103,7 @@ class LanTransport{
 
     PayloadManager payload_;
 
-    void start_introducer(){
+    void start_introducer(){ // brodcast mine tcp pipe port
       introducer_timer_.expires_after(boost::asio::chrono::seconds(INTRODUCER_WAIT));
       introducer_timer_.async_wait([this](const boost::system::error_code& e){
         if(!e){
@@ -152,8 +119,7 @@ class LanTransport{
       });
     }
 
-    void introducer_listener(){
-      
+    void introducer_listener(){ // listening for other's broadcast
       introducer_socket_.async_receive_from(boost::asio::buffer(recv_buff_),
           sender_endpoint_, [this](const boost::system::error_code& e, std::size_t bytes){
             if(!e){
@@ -162,13 +128,19 @@ class LanTransport{
               std::string m(recv_buff_.data(), bytes);
               std::cout << "\n[DEBUG] received\n" << m;
               unsigned short port = static_cast<unsigned short>(std::stoi(m.substr(14)));
-
               tcp::endpoint connected_pipe_endpoint{sender_endpoint_.address(), port};
  
-              if(connected_pipe_endpoint.address() ==  // echo of user introducer
+              if(connected_pipe_endpoint.address() ==  // echo 
                   my_ip(io_context_)){ introducer_listener(); return; }
               for(auto i : connected_pipe_peers_){ // already connected user pipes
                 if(i->socket().remote_endpoint() == connected_pipe_endpoint){
+                  introducer_listener();
+                  return;
+                }
+              }
+              // already other user connected to user's pipe(no need to do it 2 way)
+              for(auto i : user_pipe_peers_){ 
+                if(i->socket().remote_endpoint() != connected_pipe_endpoint){
                   introducer_listener();
                   return;
                 }
@@ -181,46 +153,42 @@ class LanTransport{
                     if(!e){
                       std::cout << "\n[DEBUG] connected to peer\n";
                       connected_pipe_peers_.push_back(peer);
-                      // send user database to connected pipe 
-                      // (peer send back missing stuff)
 
-                      peer->send(*db);
+                      // send user's database to connected pipe 
+                      peer->send(*db, [peer](){
+                          auto buffer = std::make_shared<boost::asio::streambuf>();
+                          peer->read(*buffer, 
+                              [buffer, peer](const boost::system::error_code& e, size_t bytes)
+                          {
+                            //!!! (peer ask for missing stuff)(afer that send mine)
+                            std::istream is(buffer.get());
+                            std::vector<char> b(buffer->size());
+                            is.read(b.data(), b.size());
 
-                      // ----test----
-/*                      std::shared_ptr<boost::asio::streambuf> recv_buff = 
- *                        std::make_shared<boost::asio::streambuf>();
-                      boost::asio::async_read_until(peer->socket(), 
-                          *recv_buff, '\n' ,
-                          [recv_buff](const boost::system::error_code& e,
-                          std::size_t bytes){
-                            std::istream stream(recv_buff.get());
-                            std::string messg;
-                            std::getline(stream, messg);
-                            std::cout << "\n[LOG] recived from connected pipe : "
-                            << messg << "\n";
-                          }); */
+                            std::map<Sign, Message> peer_miss;
 
-
+                            // serialization
+                          });
+                      });
                     }
-                  });
-          peer->read();
+              });
             }
             introducer_listener();
           });
     }
 
-    void user_pipe(){
+    void user_pipe(){ // mine tcp pipe
       LanUserPipePeers::pointer peer = LanUserPipePeers::create(io_context_);
 
-      user_pipe_acceptor_.async_accept(peer->socket(), [this, peer](const boost::system::error_code& e){
-        if(!e){
-          user_pipe_peers_.push_back(peer);
-
-          // listen for database(req what i dont have)
-        
+      user_pipe_acceptor_.async_accept(peer->socket(), 
+          [this, peer](const boost::system::error_code& e)
+        {
+          if(!e){
+            user_pipe_peers_.push_back(peer);
+            // listen for database(req what i dont have)(after that wait for other's)
           }
-        user_pipe();
-      });
+          user_pipe();
+        });
     }
 
 
@@ -237,15 +205,14 @@ class LanTransport{
       if(introducer_thread_.joinable()) introducer_thread_.join();
     }
 
-    void shout_message(std::vector<char> &msg){
+    void shout_message(std::vector<char> &msg, std::function<void()> const& lambda){
       for(LanUserPipePeers::pointer i : connected_pipe_peers_){
-        i->send(msg);
+        i->send(msg, lambda);
       }
     }
 
     void start(){
       user_pipe();
-
       start_introducer();
       introducer_listener();
       
@@ -253,9 +220,6 @@ class LanTransport{
         io_context_.run();
       });
     }
-
-
-
 };
 
 #endif
